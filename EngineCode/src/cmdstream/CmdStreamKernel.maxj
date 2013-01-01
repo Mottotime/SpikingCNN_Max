@@ -45,7 +45,8 @@ class CmdStreamKernel extends Kernel {
 		DFEVectorType<DFEVar> vectorType =
 			new DFEVectorType<DFEVar>(dfeInt(32), vectorSize);
 
-		DFEVector<DFEVar> inA = io.input("inA", vectorType);
+		DFEVector<DFEVar> inA = io.input("inA", vectorType, control.count.pulse(2, false));
+		DFEVector<DFEVar> inA2 = stream.offset(inA, -2);
 
 //		DFEVar totalBursts = io.scalarInput("totalBursts",dfeUInt(32));
 //		DFEVar wordsPerBurst = io.scalarInput("wordsPerBurst",dfeUInt(32));
@@ -57,7 +58,7 @@ class CmdStreamKernel extends Kernel {
 		//DFEVar wordCount = chain.addCounter(96, 1);
 
 		inB.simWatch("inB");
-		inA.simWatch("inA");
+		inA2.simWatch("inA2");
 		////debug.dfePrintf("vectorSize %d, ", vectorSize); // vectorSize is not visible
 
 		CircularBuffer buffer = new CircularBuffer(this, 8, dfeUInt(32));
@@ -75,15 +76,15 @@ class CmdStreamKernel extends Kernel {
 				constant.var(true),                // control
 				//inB > 0,
 				//inB_add,
-				//inB,
+				inB,
 				//inB.cast(dfeUInt(28)),             // address
 				//burstCount,
 				//count+40,
-				count,
+				//count,
 				//count > 0 ? inB : count,
 				//inA_address,
 				constant.var(dfeUInt(8), 1),       // size
-				constant.var(dfeUInt(1), 0),       // inc
+				constant.var(dfeUInt(7), 0),       // inc
 				constant.var(dfeUInt(1), 0),       // stream
 				constant.var(true)); // Shall we ? Use false?
 		/*
@@ -111,9 +112,9 @@ class CmdStreamKernel extends Kernel {
 		for(int i = 0; i < vectorSize; i++){
 
 		}*/
-		//DFEVar result = inA[0];
-		DFEVar result = inB.cast(dfeInt(32));
+		DFEVar result = inA2[0];
+		//DFEVar result = inB.cast(dfeInt(32));
 		//io.output("oData", inA[0], dfeUInt(32));
-		io.output("oData", result, dfeInt(32));
+		io.output("oData", result, dfeInt(32));//, control.count.pulse(2, false));
 	}
 }
