@@ -11,32 +11,50 @@ package cmdstream;
 
 import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
 import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
-import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.LMemCommandStream;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Counter;
 import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.memory.Memory;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix.SignMode;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
-import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
-import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
 
 class CmdStreamKernel extends Kernel {
 
-	CmdStreamKernel(KernelParameters parameters, int vectorSize, int N) {
+	CmdStreamKernel(KernelParameters parameters, int vectorSize, int maxNeuronNum) {
 		super(parameters);
+
+		// we should pass the bit width as parameter instead of maxNeuronNum
 
 		DFEVar count = control.count.simpleCounter(32);
 		debug.simPrintf("TICK: %d: ", count);
 
-		//DFEVar inB = io.input("inB", dfeUInt(32));
-		//Memory<DFEVar> mappedRom  = mem.alloc(dfeUInt(32), N);
-		//mappedRom.mapToCPU("inB");
-		Memory<DFEVar> rom = mem.alloc(dfeFloat(8, 24), N);
-		final int dataSize = 100;
-		double[] contents = new double[dataSize];
-		for(int i=0; i<dataSize; i++){
-			contents[i] = i;
-		}
-		rom.setContents(contents);
+		DFEFix bramType = dfeFixOffset(16, -8, SignMode.TWOSCOMPLEMENT); // use fix to save the cycle and resource.
+		DFEFix uintType = dfeUInt(32);
+		DFEFix addressType = dfeUInt(16);
 
-		DFEVar inB_double = rom.read(count.cast(dfeUInt(7)));
+		// vectorSize is the branch number
+		DFEVar neuronNum = io.scalarInput("neuronNum", uintType);
+		DFEVar mapWidth2 = io.scalarInput("mapWidth2", uintType); // mapWidth^2
+
+		Memory<DFEVar> V = mem.alloc(bramType, maxNeuronNum);
+		Memory<DFEVar> gather1 = mem.alloc(bramType, maxNeuronNum);
+		Memory<DFEVar> gather2 = mem.alloc(bramType, maxNeuronNum);
+
+		Memory<DFEVar> rowInTable = mem.alloc(dfeUInt(32), maxNeuronNum);
+		rowInTable.mapToCPU("rowInTable");
+
+		Count.Params paramsForNeuron = control.count.makeParams(32)
+										.withMax(neuronNum);
+		Counter neuron_counter = control.count.makeCounter(paramsForNeuron);
+
+		DFEVar neuron_idx = neuron_counter.getCount();
+		DFEVar is_input_layer = neuron_idx < mapWidth2;
+
+		DFEVar spikeInput = io.input("spikeInput", dfeFloat(16, 48), is_input_layer);
+		DFEVar v_n = is_input_layer ? spikeInput : V.read(neuron_idx.cast(addressType));
+
+/*
+		DFEVar enable_input = rom.read(count.cast(dfeUInt(7)));
 		DFEVar inB = inB_double.cast(dfeUInt(32));
 		//DFEVar inB = mappedRom.read(count.cast(dfeUInt(7)));
 
@@ -112,9 +130,11 @@ class CmdStreamKernel extends Kernel {
 		for(int i = 0; i < vectorSize; i++){
 
 		}*/
+/*
 		DFEVar result = inA2[0];
 		//DFEVar result = inB.cast(dfeInt(32));
 		//io.output("oData", inA[0], dfeUInt(32));
 		io.output("oData", result, dfeInt(32));//, control.count.pulse(2, false));
+*/
 	}
 }

@@ -1,1 +1,4 @@
 /RunRules/
+/*
+!*.c
+!*.maxj

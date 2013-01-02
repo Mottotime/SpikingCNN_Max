@@ -1,22 +1,3 @@
-/**
- * Document: Manager Compiler Tutorial (maxcompiler-manager-tutorial.pdf)
- * Chapter: 2      Example: 3      Name: Command Stream
- * MaxFile name: CmdStream
- * Summary:
- *     Writes the values for two input streams to LMem, sets up the correct
- *     data length and burst size for the computation and reads and checks the
- *     results from LMem.
- */
-
-/* *
- * 1, Generate and copy a vector to LMEM
- * 2, Generate a index stream
- * 3, Read vector from LMEM and write back to CPU
- * 	  Calculate i + a in parallel
- * 4, Use special vector item, one for a and the other is b, return a + b.
- * 5, Use producer and consumer, give index stream and valid stream.
- * */
-
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
@@ -27,52 +8,163 @@
 #include "Maxfiles.h"
 #include <MaxSLiCInterface.h>
 
-void generateInputData(int row_num, int vectorSize, int sizeBytes, int32_t *inA, int cmd_num, uint32_t *inB)
+#define total_neuron 21962
+#define time_step 100
+#define image_num 100
+#define map_width 28
+#define branch_num 128
+
+#define table_size 11744512
+#define dfe_table_size 11744640
+
+#define v_threshold 1.0
+
+// too large for stack memory.
+double weight_table[table_size];
+double address_table[table_size];
+
+double begin_synapse_table[total_neuron+1]; // one empty line for end indexing padding
+
+char customized_table[ dfe_table_size * 2 ];
+
+double v[total_neuron]; // we need to break this into branches, and leave one neuron out?
+double array1[total_neuron];
+double array2[total_neuron];
+
+double input_x[7840000]; // Too large for main function.
+double input_y[100];
+
+int output_spike_CPU[ image_num * time_step * 10 ];
+int output_spike_DFE[ image_num * time_step * 10 ];
+
+void Read_weight(char * filename, double * buffer, int expect_size)
+// expect_size: expect amount of double, not byte.
 {
-	for (int i = 0; i < row_num; i++) {
-		for(int j = 0; j < vectorSize; j++){
-			inA[ i * vectorSize + j ] = i;
-		}
-	}
-	for (int i = 0; i < cmd_num; i++ ){
-		inB[i] = i;
-	}
+        FILE * pFile;
+        long lSize;
+        //double * buffer;
+        size_t result;
+        int i;
+
+        pFile = fopen ( filename, "rb" );
+        if (pFile==NULL) {fputs ("File error",stderr); exit (1);}
+
+        // obtain file size:
+        fseek (pFile , 0 , SEEK_END);
+        lSize = ftell (pFile);
+        rewind (pFile);
+
+        if (lSize/8 != expect_size) {fputs ("Size error",stderr); printf("Actual size %ld; Expected size %d.\n", lSize/8, expect_size); exit (3);}
+
+        // copy the file into the buffer:
+        result = fread (buffer,1,lSize,pFile);
+
+        // terminate
+        fclose (pFile);
+        return;
 }
 
-void CmdStreamCPU(int cmd_num, int vectorSize, int32_t *inA, uint32_t *inB, int32_t *outData)
-{
-	//for (int i = 0; i < size; i++) {
-	//	outData[i] = inA[i] + inB[i];
-		//outData[i] = inA[ (int)round(inB[i] * 0.5) ];
-	//}
-	/*
-	// get the row
-	for (int i = 0; i < cmd_num; i++){
-		for(int j = 0; j < vectorSize; j++){
-			outData[ i * vectorSize + j ] = inA[ inB[i] * vectorSize + j ];
-		}
-	}*/
-	// get the first element in the row
-	for (int i = 0; i < cmd_num; i++){
-		outData[ i ] = inA[ inB[i] * vectorSize ];
-	}
+int max(int a, int b){
+        if(a>b){
+                return a;
+        }else{
+                return b;
+        }
 }
 
-int check(int size, int32_t *outData, int32_t *expected)
-{
-	int status = 0;
-	for (int i = 0; i < size ; i++) {
-		if (outData[i] != expected[i]) {
-			fprintf(stderr, "[%d] Verification error, out: %u != expected: %u\n",
-				i, outData[i], expected[i]);
-			status = 1;
-		}
-	}
-	return status;
+void CPUSim(int input_length, double* input_spike, int* output_spike){
+        int input_idx = 0;
+        int output_idx = 0;
+        int n; // neuron_idx;
+        double * gather1, * gather2, * temp;
+        int i;
+        int row, table_idx;
+        int output_address;
+
+        gather1 = array1;
+        gather2 = array2;
+
+        for( i = 0; i < total_neuron; i++ ){v[i] = 0; gather1[i] = 0; gather2[i] = 0;}
+
+        while(input_idx < input_length){
+
+                if( input_idx % ( time_step * map_width * map_width) == 0 )
+                        {printf("image %d; \n", input_idx / time_step / map_width / map_width);}
+
+                for( n = 0; n < total_neuron; n++ ){
+
+                        if( n < map_width * map_width ){ // 0~783, first layer
+                                v[n] = input_spike[ input_idx ];
+                                input_idx ++;
+                        }else{
+                                v[n] += gather1[n];
+                        }
+
+                        // Here comes the buffer
+
+                        if ( n >= total_neuron - 10 ){
+                                if (v[n] >= v_threshold)
+                                {
+                                        output_spike[output_idx] = 1;
+                                }else{
+                                        output_spike[output_idx] = 0;
+                                }
+                                output_idx++;
+                        }
+                        if( v[n] >= v_threshold ){
+                                  v[n] = 0;
+                                  for ( row = begin_synapse_table[n];\
+                                          row < begin_synapse_table[n+1];\
+                                          row ++ ){ // here read in the vectors
+
+                                          for( table_idx = 0; table_idx < branch_num; table_idx++ ){
+                                                  output_address = (int)address_table[ (row-1) * branch_num + table_idx ] - 1 ;
+                                                  if( output_address != 0){
+                                                          gather2[output_address] += weight_table[(row-1) * branch_num + table_idx ];
+                                                  }
+                                          }
+                                  }
+                          }
+                  }// end for n
+                  for( i = 0; i < total_neuron; i++ ){ gather1[i] = 0; }
+                  temp = gather1;
+                  gather1 = gather2;
+                  gather2 = temp;
+          }// end while input_idx
 }
 
 int main()
 {
+    int accuracy = 0;
+
+    double temp_output[10];
+    double temp_max;
+    int check_output[image_num];
+    int image, t, i;
+
+    FILE * pFile;
+
+    printf("Begin reading spiking image.\n");
+    Read_weight("/home/chuyang/Run1/imdb_test_x_100_new.bin",\
+    		input_x, map_width * map_width * time_step * image_num);
+    Read_weight("/home/chuyang/Run1/imdb_test_y_100_new.bin",\
+    		input_y, image_num);
+    printf("Finish reading spiking image.\n");
+
+    printf("Begin reading table.\n");
+    Read_weight("/home/chuyang/Run1/weight_table.bin",\
+     weight_table, table_size);
+    Read_weight("/home/chuyang/Run1/address_table.bin",\
+     address_table, table_size);
+    Read_weight("/home/chuyang/Run1/begin_synapse_table.bin",\
+     begin_synapse_table, total_neuron+1);
+    printf("Finish reading table.\n");
+
+    printf("Begin simulation.\n");
+
+    CPUSim(image_num * time_step * map_width * map_width, input_x, output_spike_CPU);
+
+/*
 	//const int vectorSize = CmdStream_vectorSize; // Why we can not set this?
 	const int vectorSize = 96; // ATTENTION: consist with kernel.
 	int sizeBytes = sizeof(int32_t);
@@ -124,7 +216,7 @@ int main()
 	int32_t *outData = malloc(sizeOutputInBytes);
 	CmdStream_readLMem(sizeOutputInBytes, sizeAInBytes, outData);
 	*/
-
+/*
 	int status = check(cmd_num, outData, expected);
 	if (status)
 		printf("Test failed.\n");
@@ -132,4 +224,6 @@ int main()
 		printf("Test passed OK!\n");
 
 	return status;
+*/
+	return 0;
 }
