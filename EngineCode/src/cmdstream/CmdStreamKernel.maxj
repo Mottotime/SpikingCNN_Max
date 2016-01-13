@@ -1,0 +1,119 @@
+/**
+ * Document: Manager Compiler Tutorial (maxcompiler-manager-tutorial.pdf)
+ * Chapter: 2      Example: 3      Name: Command Stream
+ * MaxFile name: CmdStream
+ * Summary:
+ *     Computes the sum of the two input streams and sends it to an output
+ *     stream. Also generates the three custom memory command streams needed to
+ *     control the LMem connected to these streams.
+ */
+package cmdstream;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.LMemCommandStream;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.memory.Memory;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
+
+class CmdStreamKernel extends Kernel {
+
+	CmdStreamKernel(KernelParameters parameters, int vectorSize, int N) {
+		super(parameters);
+
+		DFEVar count = control.count.simpleCounter(32);
+		debug.simPrintf("TICK: %d: ", count);
+
+		//DFEVar inB = io.input("inB", dfeUInt(32));
+		//Memory<DFEVar> mappedRom  = mem.alloc(dfeUInt(32), N);
+		//mappedRom.mapToCPU("inB");
+		Memory<DFEVar> rom = mem.alloc(dfeFloat(8, 24), N);
+		final int dataSize = 100;
+		double[] contents = new double[dataSize];
+		for(int i=0; i<dataSize; i++){
+			contents[i] = i;
+		}
+		rom.setContents(contents);
+
+		DFEVar inB_double = rom.read(count.cast(dfeUInt(7)));
+		DFEVar inB = inB_double.cast(dfeUInt(32));
+		//DFEVar inB = mappedRom.read(count.cast(dfeUInt(7)));
+
+		//DFEVar inA = io.input("inA", dfeUInt(32));
+
+		DFEVectorType<DFEVar> vectorType =
+			new DFEVectorType<DFEVar>(dfeInt(32), vectorSize);
+
+		DFEVector<DFEVar> inA = io.input("inA", vectorType);
+
+//		DFEVar totalBursts = io.scalarInput("totalBursts",dfeUInt(32));
+//		DFEVar wordsPerBurst = io.scalarInput("wordsPerBurst",dfeUInt(32));
+//		DFEVar row_num = io.scalarInput("row_num", dfeUInt(32));
+
+
+		//CounterChain chain = control.count.makeCounterChain();
+		//DFEVar burstCount = chain.addCounter(100, 1);
+		//DFEVar wordCount = chain.addCounter(96, 1);
+
+		inB.simWatch("inB");
+		inA.simWatch("inA");
+		////debug.dfePrintf("vectorSize %d, ", vectorSize); // vectorSize is not visible
+
+		CircularBuffer buffer = new CircularBuffer(this, 8, dfeUInt(32));
+		buffer.push(constant.var(true), inB);
+		//DFEVar inA_address = buffer.pop(constant.var(true));
+		DFEVar inA_address = buffer.pop( count > 1 );
+
+		//DFEVar inB_add = stream.offset(inB, 2);//inB.cast(dfeUInt(28));
+		//inB_add.simWatch("inB_add");
+		//DFEVar inB_eq_count = inB.eq(count);
+		//inB_eq_count.simWatch("inB_eq_count");
+
+		LMemCommandStream.makeKernelOutput("AcmdStream",
+				//wordCount === 0,
+				constant.var(true),                // control
+				//inB > 0,
+				//inB_add,
+				//inB,
+				//inB.cast(dfeUInt(28)),             // address
+				//burstCount,
+				//count+40,
+				count,
+				//count > 0 ? inB : count,
+				//inA_address,
+				constant.var(dfeUInt(8), 1),       // size
+				constant.var(dfeUInt(1), 0),       // inc
+				constant.var(dfeUInt(1), 0),       // stream
+				constant.var(true)); // Shall we ? Use false?
+		/*
+		LMemCommandStream.makeKernelOutput("BcmdStream",
+				wordCount === 0,                 // control
+				//wordCount >= 0,
+				totalBursts + burstCount,        // address
+				constant.var(dfeUInt(8), 1),      // size
+				constant.var(dfeUInt(1), 0),      // inc
+				constant.var(dfeUInt(1), 0),      // stream
+				constant.var(false));
+		*/
+		/*
+		LMemCommandStream.makeKernelOutput("OcmdStream",
+				count >= 0,                  // control
+				row_num + count,     // address
+				constant.var(dfeUInt(8), 1),       // size
+				constant.var(dfeUInt(1), 0),       // inc
+				constant.var(dfeUInt(1), 0),       // stream
+				count === (totalBursts - 1));
+		*/
+		/*
+		DFEVector<DFEVar> outputVector =
+			vectorType.newInstance(this);
+		for(int i = 0; i < vectorSize; i++){
+
+		}*/
+		//DFEVar result = inA[0];
+		DFEVar result = inB.cast(dfeInt(32));
+		//io.output("oData", inA[0], dfeUInt(32));
+		io.output("oData", result, dfeInt(32));
+	}
+}

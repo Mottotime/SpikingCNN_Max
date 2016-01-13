@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<maxCompilerManager version="2">
+<enginePart internalEngineSubproject="version1_EngineCode" isSrcBin="false" isUseDefaultSelected="false" outputLocation="/version1_EngineCode/bin" projectName="version1"/>
+<cpuPart internalCpuSubproject="version1_CPUCode"/>
+<watchedFiles/>
+</maxCompilerManager>
